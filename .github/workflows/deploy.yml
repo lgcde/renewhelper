@@ -12,11 +12,12 @@ jobs:
     name: Deploy
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Inject KV ID
         run: |
           sed -i 's/^\s*id = ""/id = "${{ secrets.CF_KV_ID }}"/' wrangler.toml
+          sed -i '/AUTH_PASSWORD/d' wrangler.toml
 
       - name: Deploy with Wrangler
         uses: cloudflare/wrangler-action@v3
