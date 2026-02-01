@@ -278,6 +278,23 @@ docker compose pull
 docker compose up -d
 ```
 
+### Telegram 代理服务部署 (可选)
+
+> ⚠️ **仅适用于中国大陆用户**：由于网络原因，国内服务器可能无法直接连接 Telegram API。您可以部署本项目提供的轻量级反代，同时兼容Worker/Pages/Snippets，建议部署方式：Snippets（无次数限制速度快） > Pages（无次数限制） > Worker（有次数限制）。
+
+1.  **准备文件**：复制本项目 `renewhelper/telegram_proxy/_worker.js` 的代码。
+2.  **创建 Worker/Pages/Snippets**：
+    *   在 Cloudflare 后台创建一个新的 Worker/Pages/Snippets（例如命名为 `tg-proxy`）。
+    *   粘贴代码并部署。
+3.  **配置白名单 (变量名: `TG_ALLOW_TOKENS`)**：
+    *   在 Worker/Pages 设置 -> 变量中，添加 `TG_ALLOW_TOKENS`(Pages需要重新部署一遍生效)。
+    *   值填写您的 Bot Token（如果有多个用逗号分隔）。
+    *   *如果不配置环境变量，需手动修改代码中的 `WHITELIST_TOKENS` 常量。*
+4.  **使用**：
+    *   您的代理地址为：`https://tg-proxy.您的子域名.workers.dev`
+    *   此服务可作为 Telegram API 的透明代理，支持 `POST /bot<Token>/<Method>` 格式的请求。
+    *   *注：此脚本主要用于解决 Docker 部署环境下或特定网络环境下无法访问 Telegram API 的问题。*
+
 ### 🎉 部署完成！
 
 ---
@@ -301,7 +318,7 @@ docker compose up -d
 
 | 渠道              | 参数说明                                                           | 获取/配置方法                                                                                                                                                                                                                               |
 | :---------------- | :----------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Telegram**      | **Token**: 机器人令牌<br>**Chat ID**: 您的用户 ID 或群组 ID        | 1. 找 [@BotFather](https://t.me/BotFather) 创建机器人获取 Token。找`@userinfobot`获取UserID。<br>2. 或浏览器访问 `https://api.telegram.org/bot<YourToken>/getUpdates` <br>3. 添加您的机器人为好友，并发送任意消息给机器人。<br>4. 在刚才打开的 URL 页面刷新获取 Chat ID。 |
+| **Telegram**      | **Token**: 机器人令牌<br>**Chat ID**: 您的用户 ID 或群组 ID<br>**Server**: (可选) 自定义 API 地址 | 1. 找 [@BotFather](https://t.me/BotFather) 创建机器人获取 Token。找`@userinfobot`获取UserID。<br>2. 或浏览器访问 `https://api.telegram.org/bot<YourToken>/getUpdates` <br>3. 添加您的机器人为好友，并发送任意消息给机器人。<br>4. 在刚才打开的 URL 页面刷新获取 Chat ID。<br>5. **Server**: 默认为 `https://api.telegram.org`。如需使用反代，请填入完整地址（如您的 [Telegram 反代服务](#telegram-代理服务部署-可选) URL`https://tg-proxy.your-name.pages.dev`）。 |
 | **Bark** (iOS)    | **Server**: 服务器地址<br>**Device Key**: 设备密钥                 | 1. App Store 下载 Bark 应用。<br>2. 复制 App 内显示的服务器地址和 Key。                                                                                                                                                                     |
 | **PushPlus**      | **Token**: 用户令牌                                                | 1. 访问 [PushPlus 官网](https://www.pushplus.plus/)。<br>2. 微信扫码登录获取 Token。                                                                                                                                                        |
 | **NotifyX**       | **API Key**: 密钥                                                  | 1. 访问 [NotifyX 官网](https://www.notifyx.cn/)。 <br>2. 微信扫码登录获取 API Key。                                                                                                                                                         |

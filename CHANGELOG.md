@@ -31,3 +31,4 @@
 - 2026-01-08: modified: fix UI bugs, infinite loop risk, update docs v2.0.18
 - 2026-01-08: hotfix: emergency fix v2.0.19
 - 2026-01-09: added: exchange rate proxy, kv cache, auto-sync workflow, watchtower support v2.0.20
+- 2026-02-01: added: add telegram proxy for china mainland; improved: migration confirmation dialog & ui layoutcompact; fixed: sort icon issue v2.2.7

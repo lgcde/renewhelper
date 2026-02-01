@@ -1,11 +1,11 @@
 /**
- * Cloudflare Worker: RenewHelper (v2.2.22)
+ * Cloudflare Worker: RenewHelper (v2.2.7)
  * Author: LOSTFREE
  * Features: Multi-Channel Notify, Import/Export, Channel Test, Bilingual UI, Precise ICS Alarm，Bill Management.
  * See CHANGELOG.md for history.
  */
 
-const APP_VERSION = "v2.2.4";
+const APP_VERSION = "v2.2.7";
 //接入免费汇率API
 const EXCHANGE_RATE_API_URL = 'https://api.frankfurter.dev/v1/latest?base=';
 
@@ -581,9 +581,6 @@ const Notifier = {
         return results.join(" ");
     },
 
-    // Legacy Support (Optional, can be removed if all callers updated)
-    // async send(...) { ... } - REMOVED
-
     adapters: {
         telegram: async (c, title, body) => {
             if (!c.token || !c.chatId) return "MISSING_CONF";
@@ -631,7 +628,7 @@ const Notifier = {
         notifyx: async (c, title, body) => {
             if (!c.apiKey) return "MISSING_CONF";
             let description = "Alert";
-            const content = body.replace(/\n/g, "\n\n"); // NotifyX 使用 Markdown
+            const content = body.replace(/\n/g, "\n\n");
             const r = await fetch(`https://www.notifyx.cn/api/v1/send/${c.apiKey}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -676,7 +673,7 @@ const Notifier = {
         ntfy: async (c, title, body) => {
             if (!c.topic) return "MISSING_CONF";
             const server = (c.server || "https://ntfy.sh").replace(/\/$/, "");
-            const headers = { "Title": title }; // Encode title in header to avoid encoding issues
+            const headers = { "Title": title };
             if (c.token) headers["Authorization"] = `Bearer ${c.token}`;
 
             const r = await fetch(`${server}/${c.topic}`, {
@@ -703,10 +700,14 @@ async function webhookAdapterImpl(c, title, body) {
         let reqBody = JSON.stringify({ title, content: body });
         if (c.body) {
             // Unescape JSON string placeholders safely
-            // Users provide: {"text": "Title: {title}\nBody: {body}"}
+            // Handle escaped newlines in user-provided body template (e.g. "\\n" -> "\n")
+            const safeTitle = JSON.stringify(title).slice(1, -1);
+            const safeBody = JSON.stringify(body).slice(1, -1);
+
+            // Use callback function in replace to avoid special replacement patterns (like $&, $1)
             let raw = c.body
-                .replace(/{title}/g, JSON.stringify(title).slice(1, -1))
-                .replace(/{body}/g, JSON.stringify(body).slice(1, -1));
+                .replace(/{title}/g, () => safeTitle)
+                .replace(/{body}/g, () => safeBody);
             reqBody = raw;
         }
 
@@ -715,6 +716,7 @@ async function webhookAdapterImpl(c, title, body) {
             headers: headers,
             body: reqBody,
         });
+
         return r.ok ? "OK" : "FAIL";
     } catch (e) {
         return "ERR";
@@ -1031,6 +1033,7 @@ async function checkAndRenew(env, isSched, lang = "zh") {
                 old: oldLastRenew,
                 new: todayStr,
                 note: msg,
+                notifyChannelIds: it.notifyChannelIds
             });
             items[i] = it;
             changed = true;
@@ -1095,59 +1098,72 @@ async function checkAndRenew(env, isSched, lang = "zh") {
 
     // 推送通知逻辑
     if (s.enableNotify) {
-        let pushBody = [];
-        if (dis.length) {
-            pushBody.push(`【${t("secDis", lang)}】`);
-            dis.forEach((x, i) =>
-                pushBody.push(`${i + 1}. ${x.name} (${t("overdue", lang, Math.abs(x.daysLeft))} / ${x.nextDueDate})\n${x.note}`)
-            );
-            pushBody.push("");
-        }
-        if (upd.length) {
-            pushBody.push(`【${t("secRen", lang)}】`);
-            upd.forEach((x, i) =>
-                pushBody.push(`${i + 1}. ${x.name}: ${x.old} -> ${x.new}\n${x.note}`)
-            );
-            pushBody.push("");
-        }
-        if (trig.length) {
-            pushBody.push(`【${t("secAle", lang)}】`);
-            trig.forEach((x, i) => {
-                const dayStr = x.daysLeft === 0 ? t("today", lang) : (x.daysLeft < 0 ? t("overdue", lang, Math.abs(x.daysLeft)) : t("left", lang, x.daysLeft));
-                pushBody.push(`${i + 1}. ${x.name}: ${dayStr} (${x.nextDueDate})\n${x.note}`);
-            });
-        }
+        const title = s.notifyTitle || t("pushTitle", lang);
 
-        if (pushBody.length > 0) {
-            const fullBody = pushBody.join("\n").trim();
-            const title = s.notifyTitle || t("pushTitle", lang);
+        const allChannels = s.channels ? s.channels.filter(c => c.enable) : [];
+        if (allChannels.length === 0) {
+            log(`[PUSH] No enabled channels found.`);
+        } else {
+            const pushTasks = [];
 
-            // 2026-01-23 Refactor: Group items by Resolved Channel List
-            // Different items might go to different channels.
-            // But here we are sending a BATCH report (Cron Job).
-            // For Cron Report, the logic is tricky:
-            // - Option A: Send ONE report to ALL channels that are relevant to ANY of the items.
-            // - Option B: Split reports per channel (channel A gets items for A, channel B gets items for B).
+            // 按渠道分组推送，支持服务级别的渠道选择
+            for (const ch of allChannels) {
+                // Filter items for this channel
+                // Rule: If item.notifyChannelIds is empty -> Send to ALL enabled channels (Default)
+                //       If item.notifyChannelIds has values -> Only send if contains current ch.id
+                const shouldSendToChannel = (item) => {
+                    // Check undefined/null/empty/not-array
+                    if (!item.notifyChannelIds || !Array.isArray(item.notifyChannelIds) || item.notifyChannelIds.length === 0) {
+                        return true;
+                    }
+                    return item.notifyChannelIds.includes(ch.id);
+                };
 
-            // Current Approach: "Global Broadcast" style for Cron Report to keep it simple & robust.
-            // If we split, a user with 5 channels might get 5 partial reports, which is annoying.
-            // So we default to: Send the Full Cron Report to ALL Enabled Channels.
-            // (The per-service channel setting is mostly for individual alerts if we implement them later, 
-            //  or if the user specifically wants to segregate, but for a Daily Report, a Summary is best).
+                const chDis = dis.filter(shouldSendToChannel);
+                const chUpd = upd.filter(shouldSendToChannel);
+                const chTrig = trig.filter(shouldSendToChannel);
 
-            const allEnabledParams = s.channels ? s.channels.filter(c => c.enable) : [];
-            /* 
-               If we wanted to strictly follow "Per Item Channel":
-               We would need to construct a Map<ChannelId, ItemContent[]>.
-               But cron report mixes "Renewed", "Disabled", "Alert".
-               Let's stick to Broadcasting the full report to all enabled channels for now as a safe default for the Report.
-            */
+                // If nothing to send for this channel, skip
+                if (chDis.length === 0 && chUpd.length === 0 && chTrig.length === 0) {
+                    continue;
+                }
 
-            if (allEnabledParams.length > 0) {
-                const pushRes = await Notifier.dispatch(allEnabledParams, title, fullBody);
-                log(`[PUSH] ${pushRes}`);
-            } else {
-                log(`[PUSH] No enabled channels found.`);
+                // Build Body for this channel
+                let pushBody = [];
+                if (chDis.length) {
+                    pushBody.push(`【${t("secDis", lang)}】`);
+                    chDis.forEach((x, i) =>
+                        pushBody.push(`${i + 1}. ${x.name} (${t("overdue", lang, Math.abs(x.daysLeft))} / ${x.nextDueDate})\n${x.note}`)
+                    );
+                    pushBody.push("");
+                }
+                if (chUpd.length) {
+                    pushBody.push(`【${t("secRen", lang)}】`);
+                    chUpd.forEach((x, i) =>
+                        pushBody.push(`${i + 1}. ${x.name}: ${x.old} -> ${x.new}\n${x.note}`)
+                    );
+                    pushBody.push("");
+                }
+                if (chTrig.length) {
+                    pushBody.push(`【${t("secAle", lang)}】`);
+                    chTrig.forEach((x, i) => {
+                        const dayStr = x.daysLeft === 0 ? t("today", lang) : (x.daysLeft < 0 ? t("overdue", lang, Math.abs(x.daysLeft)) : t("left", lang, x.daysLeft));
+                        pushBody.push(`${i + 1}. ${x.name}: ${dayStr} (${x.nextDueDate})\n${x.note}`);
+                    });
+                }
+
+                const fullBody = pushBody.join("\n").trim();
+
+                // Dispatch to single channel
+                pushTasks.push(
+                    Notifier.dispatch([ch], title, fullBody)
+                        .then(res => `[${ch.name}]: ${res}`)
+                );
+            }
+
+            if (pushTasks.length > 0) {
+                const results = await Promise.all(pushTasks);
+                log(`[PUSH] ${results.join(' ')}`);
             }
         }
     }
@@ -2590,14 +2606,14 @@ const HTML = `<!DOCTYPE html>
     
                         <!-- Content Area -->
                         <div class="flex-1 bg-white dark:bg-slate-900 flex flex-col h-full relative min-w-0 scrollbar-thin overflow-y-auto">
-                             <div class="flex-1 p-6">
+                             <div class="flex-1 p-4">
                                  <!-- 1. Preferences -->
-                                 <div v-if="activeTab === 'pref'" class="space-y-6">
-                                      <h3 class="text-lg font-bold text-slate-800 dark:text-gray-100 mb-6 pb-2 border-b border-gray-100 dark:border-slate-800 flex items-center gap-2">
+                                 <div v-if="activeTab === 'pref'" class="space-y-4">
+                                      <h3 class="text-base font-bold text-slate-800 dark:text-gray-100 mb-3 pb-2 border-b border-gray-100 dark:border-slate-800 flex items-center gap-2">
                                           {{ lang==='zh'?'偏好设置':'Preferences' }}
                                       </h3>
                                       <el-form :model="settingsForm" label-position="top">
-                                          <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                               <el-form-item :label="t('timezone')">
                                                   <el-select v-model="settingsForm.timezone" style="width:100%" filterable placeholder="Select Timezone">
                                                       <el-option v-for="item in timezoneList" :key="item.value" :label="item.label" :value="item.value"></el-option>
@@ -2616,9 +2632,9 @@ const HTML = `<!DOCTYPE html>
 
                              <!-- 2. Notifications -->
                              <div v-if="activeTab === 'notify'" class="space-y-4">
-                                  <h3 class="text-lg font-bold text-slate-800 dark:text-gray-100 mb-6 pb-2 border-b border-gray-100 dark:border-slate-800">{{ lang==='zh'?'通知配置':'Notifications' }}</h3>
+                                  <h3 class="text-base font-bold text-slate-800 dark:text-gray-100 mb-3 pb-2 border-b border-gray-100 dark:border-slate-800">{{ lang==='zh'?'通知配置':'Notifications' }}</h3>
                                   
-                                  <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4 p-4 bg-blue-50 dark:bg-slate-800/50 rounded-lg">
+                                  <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3 p-3 bg-blue-50 dark:bg-slate-800/50 rounded-lg">
                                       <span class="text-sm font-bold text-slate-700 dark:text-slate-200">{{ t('pushSwitch') }}</span>
                                       <el-switch v-model="settingsForm.enableNotify" style="--el-switch-on-color:#2563eb;"></el-switch>
                                       <div v-if="settingsForm.enableNotify" class="w-full sm:w-auto sm:ml-auto flex items-center gap-2 border-t border-blue-100 dark:border-slate-700 sm:border-0 pt-2 sm:pt-0 mt-1 sm:mt-0">
@@ -2675,7 +2691,7 @@ const HTML = `<!DOCTYPE html>
                                                           <el-tooltip :content="t('modify')" placement="top" :show-after="500">
                                                               <el-button link type="primary" :icon="Edit" @click="openEditChannel(settingsForm.channels.findIndex(c=>c.id===ch.id))" class="!px-1.5"></el-button>
                                                           </el-tooltip>
-                                                          <el-tooltip :content="t('tipDelete')" placement="top" :show-after="500">
+                                                          <el-tooltip :content="t('tipDeleteCh')" placement="top" :show-after="500">
                                                               <el-button link type="danger" :icon="Delete" @click="deleteChannelById(ch.id)" class="!px-1.5"></el-button>
                                                           </el-tooltip>
                                                       </div>
@@ -2688,7 +2704,7 @@ const HTML = `<!DOCTYPE html>
                                                                 <el-dropdown-menu>
                                                                   <el-dropdown-item :icon="VideoPlay" @click="testChannel(ch)">{{ t('btnTest') }}</el-dropdown-item>
                                                                   <el-dropdown-item :icon="Edit" @click="openEditChannel(settingsForm.channels.findIndex(c=>c.id===ch.id))">{{ t('modify') }}</el-dropdown-item>
-                                                                  <el-dropdown-item :icon="Delete" divided @click="deleteChannelById(ch.id)" class="!text-red-500">{{ t('tipDelete') }}</el-dropdown-item>
+                                                                  <el-dropdown-item :icon="Delete" divided @click="deleteChannelById(ch.id)" class="!text-red-500">{{ t('tipDeleteCh') }}</el-dropdown-item>
                                                                 </el-dropdown-menu>
                                                               </template>
                                                           </el-dropdown>
@@ -2707,9 +2723,9 @@ const HTML = `<!DOCTYPE html>
                              
                              <!-- 3. Calendar -->
                              <div v-if="activeTab === 'calendar'">
-                                  <h3 class="text-lg font-bold text-slate-800 dark:text-gray-100 mb-6 pb-2 border-b border-gray-100 dark:border-slate-800">{{ lang==='zh'?'日历订阅':'Calendar Subscription' }}</h3>
+                                  <h3 class="text-base font-bold text-slate-800 dark:text-gray-100 mb-3 pb-2 border-b border-gray-100 dark:border-slate-800">{{ lang==='zh'?'日历订阅':'Calendar Subscription' }}</h3>
                                   
-                                  <div class="bg-gray-50 dark:bg-slate-800/50 p-4 rounded-lg border border-gray-100 dark:border-slate-700">
+                                  <div class="bg-gray-50 dark:bg-slate-800/50 p-3 rounded-lg border border-gray-100 dark:border-slate-700">
                                       <div class="flex justify-between items-center mb-3">
                                           <span class="text-sm font-bold text-gray-700 dark:text-gray-300">{{ t('lblIcsUrl') }}</span>
                                           <el-button 
@@ -2743,10 +2759,10 @@ const HTML = `<!DOCTYPE html>
 
                              <!-- 4. Data -->
                              <div v-if="activeTab === 'data'">
-                                  <h3 class="text-lg font-bold text-slate-800 dark:text-gray-100 mb-6 pb-2 border-b border-gray-100 dark:border-slate-800">{{ lang==='zh'?'数据管理':'Data Management' }}</h3>
+                                  <h3 class="text-base font-bold text-slate-800 dark:text-gray-100 mb-3 pb-2 border-b border-gray-100 dark:border-slate-800">{{ lang==='zh'?'数据管理':'Data Management' }}</h3>
                                   
-                                  <div class="space-y-4">
-                                      <div class="p-4 border border-gray-100 dark:border-slate-700 rounded-lg flex items-center justify-between">
+                                  <div class="space-y-3">
+                                      <div class="p-3 border border-gray-100 dark:border-slate-700 rounded-lg flex items-center justify-between">
                                           <div>
                                               <div class="font-bold text-slate-700 dark:text-gray-200">{{ t('btnExport') }}</div>
                                               <div class="text-xs text-gray-400 mt-1">{{ lang==='zh'?'导出所有数据和配置为 JSON 文件':'Export all data and settings as JSON' }}</div>
@@ -2754,7 +2770,7 @@ const HTML = `<!DOCTYPE html>
                                           <el-button type="success" plain :icon="Download" @click="exportData">{{ lang==='zh'?'导出':'Export' }}</el-button>
                                       </div>
                                       
-                                      <div class="p-4 border border-gray-100 dark:border-slate-700 rounded-lg flex items-center justify-between">
+                                      <div class="p-3 border border-gray-100 dark:border-slate-700 rounded-lg flex items-center justify-between">
                                           <div>
                                               <div class="font-bold text-slate-700 dark:text-gray-200">{{ t('btnImport') }}</div>
                                               <div class="text-xs text-gray-400 mt-1">{{ lang==='zh'?'从 JSON 文件恢复数据':'Restore data from JSON file' }}</div>
@@ -2765,13 +2781,13 @@ const HTML = `<!DOCTYPE html>
                                           </div>
                                       </div>
                                       
-                                      <div class="p-4 border border-gray-100 dark:border-slate-700 rounded-lg flex items-center justify-between bg-gray-50 dark:bg-slate-800/30">
+                                      <div class="p-3 border border-gray-100 dark:border-slate-700 rounded-lg flex items-center justify-between bg-gray-50 dark:bg-slate-800/30">
                                           <div>
                                               <div class="font-bold text-slate-700 dark:text-gray-200">{{ lang==='zh'?'数据迁移':'Migration' }}</div>
                                               <div class="text-xs text-gray-400 mt-1">{{ lang==='zh'?'迁移旧版账单与通知渠道配置':'Migrate legacy bills & channels' }}</div>
                                           </div>
-                                          <el-button type="info" plain @click="migrateOldData">
-                                              {{ lang === 'zh' ? '执行迁移' : 'Execute' }}
+                                          <el-button type="info" plain :icon="Sort" @click="migrateOldData">
+                                              {{ lang === 'zh' ? '迁移' : 'Migrate' }}
                                           </el-button>
                                       </div>
                                   </div>
@@ -3040,7 +3056,7 @@ const HTML = `<!DOCTYPE html>
     <script>
         const { createApp, ref, computed, onMounted, onUnmounted, nextTick, reactive,watch } = Vue;
         const { ElMessage, ElMessageBox } = ElementPlus;
-        const { Edit, Delete, Plus, VideoPlay, Setting, Bell, Document, Lock, Monitor, SwitchButton, Calendar, Timer, Files, AlarmClock, Warning, Search, Cpu, Upload, Download, Link, Connection, Message, Promotion, Iphone, Moon, Sunny, RefreshRight, More, ArrowDown, Tickets } = ElementPlusIconsVue;
+        const { Edit, Delete, Plus, VideoPlay, Setting, Bell, Document, Lock, Monitor, SwitchButton, Calendar, Timer, Files, AlarmClock, Warning, Search, Cpu, Upload, Download, Link, Connection, Message, Promotion, Iphone, Moon, Sunny, RefreshRight, More, ArrowDown, Tickets, Sort } = ElementPlusIconsVue;
         const ZhCn = window.ElementPlusLocaleZhCn || {};
         const frontendCalc = {
             l2s(l) {
@@ -3085,23 +3101,23 @@ const HTML = `<!DOCTYPE html>
             }
         };
         const messages = {
-            zh: { upcomingBillsDays:'待付款提醒天数', upcomingBills: '%s日内待付款项', filter:{expired:'已过期 / 今天', w7:'%s天内', w30:'30天内', thisMonth:'本月内', nextMonth:'下月内', halfYear:'半年内', oneYear:'1年内', new:'新服务 (<30天)', stable:'稳定 (1个月-1年)', long:'长期 (>1年)', m1:'最近1个月', m6:'半年内', year:'今年内', earlier:'更早以前'}, viewSwitch:'视图切换',viewProjects:'项目列表',viewSpending:'支出分析',annualSummary:'年度汇总',monthlyTrend:'月度趋势',noSpendingData:'暂无支出数据',avgMonthly:'月均',billAmount:'账单金额 (按账单周期)',opSpending:'实际支出 (按操作日期)',secPref: '偏好设置',manualRenew: '手动续期',tipToggle: '切换状态',tipRenew: '手动续期',tipEdit: '编辑服务',tipDelete: '删除服务',secNotify: '通知配置',secData: '数据管理',lblIcsTitle: '日历订阅',lblIcsUrl: '订阅地址 (iOS/Google)',btnCopy: '复制',btnResetToken: '重置令牌',loginTitle:'身份验证',passwordPlaceholder:'请输入访问密钥/Authorization Key',unlockBtn:'解锁终端/UNLOCK',check:'立即检查',add:'新增服务',settings:'系统设置',logs:'运行日志',logout:'安全退出',totalServices:'服务总数',expiringSoon:'即将到期',expiredAlert:'已过期 / 警告',serviceName:'服务名称',type:'类型',nextDue:'下次到期',uptime:'已运行',lastRenew:'上次续期',cyclePeriod:'周期',actions:'操作',cycle:'循环订阅',reset:'到期重置',disabled:'已停用',days:'天',daysUnit:'天',typeReset:'到期重置',typeCycle:'循环订阅',lunarCal:'农历',lbOffline:'离线',unit:{day:'天',month:'月',year:'年'},editService:'编辑服务',editLastRenewHint:'请在「历史记录」中修改',newService:'新增服务',formName:'名称',namePlaceholder:'例如: Netflix',formType:'模式',createDate:'创建时间',interval:'周期时长',note:'备注信息',status:'状态',active:'启用',disabledText:'禁用',cancel:'取消',save:'保存数据',saveSettings:'保存配置',settingsTitle:'系统设置',setNotify:'通知配置',pushSwitch:'推送总开关',pushUrl:'Webhook 地址',notifyThreshold:'提醒阈值',setAuto:'自动化配置',autoRenewSwitch:'自动续期',autoRenewThreshold:'自动续期阈值',autoDisableThreshold:'自动禁用阈值',daysOverdue:'天后触发',sysLogs:'系统日志',execLogs:'执行记录',clearHistory:'清空历史',noLogs:'无记录',liveLog:'实时终端',btnExport: '导出备份',btnImport: '恢复备份',btnTest: '发送测试',btnRefresh:'刷新日志',
+            zh: { upcomingBillsDays:'待付款提醒天数', upcomingBills: '%s日内待付款项', filter:{expired:'已过期 / 今天', w7:'%s天内', w30:'30天内', thisMonth:'本月内', nextMonth:'下月内', halfYear:'半年内', oneYear:'1年内', new:'新服务 (<30天)', stable:'稳定 (1个月-1年)', long:'长期 (>1年)', m1:'最近1个月', m6:'半年内', year:'今年内', earlier:'更早以前'}, viewSwitch:'视图切换',viewProjects:'项目列表',viewSpending:'支出分析',annualSummary:'年度汇总',monthlyTrend:'月度趋势',noSpendingData:'暂无支出数据',avgMonthly:'月均',billAmount:'账单金额 (按账单周期)',opSpending:'实际支出 (按操作日期)',secPref: '偏好设置',manualRenew: '手动续期',tipToggle: '切换状态',tipRenew: '手动续期',tipEdit: '编辑服务',tipDelete: '删除服务',tipDeleteCh: '删除渠道',secNotify: '通知配置',secData: '数据管理',lblIcsTitle: '日历订阅',lblIcsUrl: '订阅地址 (iOS/Google)',btnCopy: '复制',btnResetToken: '重置令牌',loginTitle:'身份验证',passwordPlaceholder:'请输入访问密钥/Authorization Key',unlockBtn:'解锁终端/UNLOCK',check:'立即检查',add:'新增服务',settings:'系统设置',logs:'运行日志',logout:'安全退出',totalServices:'服务总数',expiringSoon:'即将到期',expiredAlert:'已过期 / 警告',serviceName:'服务名称',type:'类型',nextDue:'下次到期',uptime:'已运行',lastRenew:'上次续期',cyclePeriod:'周期',actions:'操作',cycle:'循环订阅',reset:'到期重置',disabled:'已停用',days:'天',daysUnit:'天',typeReset:'到期重置',typeCycle:'循环订阅',lunarCal:'农历',lbOffline:'离线',unit:{day:'天',month:'月',year:'年'},editService:'编辑服务',editLastRenewHint:'请在「历史记录」中修改',newService:'新增服务',formName:'名称',namePlaceholder:'例如: Netflix',formType:'模式',createDate:'创建时间',interval:'周期时长',note:'备注信息',status:'状态',active:'启用',disabledText:'禁用',cancel:'取消',save:'保存数据',saveSettings:'保存配置',settingsTitle:'系统设置',setNotify:'通知配置',pushSwitch:'推送总开关',pushUrl:'Webhook 地址',notifyThreshold:'提醒阈值',setAuto:'自动化配置',autoRenewSwitch:'自动续期',autoRenewThreshold:'自动续期阈值',autoDisableThreshold:'自动禁用阈值',daysOverdue:'天后触发',sysLogs:'系统日志',execLogs:'执行记录',clearHistory:'清空历史',noLogs:'无记录',liveLog:'实时终端',btnExport: '导出备份',btnImport: '恢复备份',btnTest: '发送测试',btnRefresh:'刷新日志',
             lblEnable: '启用', lblToken: '令牌 (Token)', lblApiKey: 'API Key', lblChatId: '会话ID', 
             lblServer: '服务器URL', lblDevKey: '设备Key', lblFrom: '发件人', lblTo: '收件人',
             lblTopic: '主题 (Topic)',readOnly: '只读',
             lblNotifyTime: '提醒时间', btnResetToken: '重置令牌',
             lblHeaders: '请求头 (JSON)', lblBody: '消息体 (JSON)',
             tag:{alert:'触发提醒',renew:'自动续期',disable:'自动禁用',normal:'检查正常'},tagLatest:'最新',tagAuto:'自动',tagManual:'手动',msg:{confirmRenew: '确认将 [%s] 的更新日期设置为今天吗？',renewSuccess: '续期成功！日期已更新: %s -> %t',tokenReset: '令牌已重置，请更新订阅地址', copyOk: '链接已复制', exportSuccess: '备份已下载',importSuccess: '数据恢复成功，即将刷新',importFail: '导入失败，请检查文件格式',passReq:'请输入密码',saved:'保存成功',saveFail:'保存失败',cleared:'已清空',clearFail:'清空失败',loginFail:'验证失败',loadLogFail:'日志加载失败',confirmDel:'确认删除此项目?',dateError:'上次更新日期不能早于创建日期',nameReq:'服务名称不能为空',nameExist:'服务名称已存在',futureError:'上次续期不能是未来时间',serviceDisabled:'服务已停用',serviceEnabled:'服务已启用',execFinish: '执行完毕!'},tags:'标签',tagPlaceholder:'输入标签回车创建',searchPlaceholder:'搜索标题或备注...',tagsCol:'标签',tagAll:'全部',useLunar:'农历周期',lunarTip:'按农历日期计算周期',yes:'是',no:'否',timezone:'偏好时区',disabledFilter:'已停用',policyConfig:'自动化策略',policyNotify:'提醒提前期',policyAuto:'自动续期',policyRenewDay:'过期续期天数',useGlobal:'全局默认',autoRenewOnDesc:'过期自动续期',autoRenewOffDesc:'过期自动禁用',previewCalc:'根据上次续期日期和周期计算',nextDue:'下次到期',
-            fixedPrice:'账单额',currency:'币种',defaultCurrency:'默认币种',history:'历史记录',historyTitle:'续费历史',totalCost:'总花费',totalCount:'续费次数',renewDate:'操作日期',billPeriod:'账单周期',startDate:'开始日期',endDate:'结束日期',actualPrice:'实付金额',notePlaceholder:'可选备注...',btnAddHist:'补录历史',modify:'修改',confirmDelHist:'删除此记录?',opDate:'操作日',amount:'金额',period:'周期',spendingDashboard:'花销看板',monthlyBreakdown:'月度明细',total:'总计',count:'笔',growth:'环比',currMonth:'本月',avgMonthlyLabel:'月均支出',itemDetails:'项目明细',noData:'暂无数据',predictedTag:'预测',last12M:'最近12个月', lblPushTitle:'自定义标题', pushTitle:'RenewHelper 报告',
+            fixedPrice:'账单额',currency:'币种',defaultCurrency:'默认币种',history:'历史记录',historyTitle:'续费历史',totalCost:'总花费',totalCount:'续费次数',renewDate:'操作日期',billPeriod:'账单周期',startDate:'开始日期',endDate:'结束日期',actualPrice:'实付金额',notePlaceholder:'可选备注...',btnAddHist:'补录历史',modify:'修改渠道',confirmDelHist:'删除此记录?',opDate:'操作日',amount:'金额',period:'周期',spendingDashboard:'花销看板',monthlyBreakdown:'月度明细',total:'总计',count:'笔',growth:'环比',currMonth:'本月',avgMonthlyLabel:'月均支出',itemDetails:'项目明细',noData:'暂无数据',predictedTag:'预测',last12M:'最近12个月', lblPushTitle:'自定义标题', pushTitle:'RenewHelper 报告',
             addChannel: '添加渠道', noChannels: '暂无推送渠道，请点击右上角添加。', modifyChannel: '配置渠道', channelType: '渠道类型', channelName: '渠道名称 (备注)', selectChannels: '选择推送渠道 (留空则默认推送所有)'},
-            en: { upcomingBillsDays:'Pending Reminder', upcomingBills: '%s Days Pending', viewSwitch:'VIEW SWITCH',viewProjects:'PROJECTS',viewSpending:'DASHBOARD',annualSummary:'Annual Summary',monthlyTrend:'Monthly Trend',noSpendingData:'No Spending Data',billAmount:'BILL AMOUNT',opSpending:'ACTUAL COST', avgMonthly:'AVG', avgMonthlyLabel:'AVG MONTHLY', filter:{expired:'Overdue/Today', w7:'Within %s Days', w30:'Within 30 Days', future:'Future(>30d)', new:'New (<30d)', stable:'Stable (1m-1y)', long:'Long Term (>1y)', m1:'Last Month', m6:'Last 6 Months', year:'This Year', earlier:'Earlier'}, secPref: 'PREFERENCES',manualRenew: 'Quick Renew',tipToggle: 'Toggle Status',tipRenew: 'Quick Renew',tipEdit: 'Edit Service',tipDelete: 'Delete Service',secNotify: 'NOTIFICATIONS',secData: 'DATA MANAGEMENT',lblIcsTitle: 'CALENDAR SUBSCRIPTION',lblIcsUrl: 'ICS URL (iOS/Google Calendar)',btnCopy: 'COPY',btnResetToken: 'RESET TOKEN',loginTitle:'SYSTEM ACCESS',passwordPlaceholder:'Authorization Key',unlockBtn:'UNLOCK TERMINAL',check:'CHECK',add:'ADD NEW',settings:'CONFIG',logs:'LOGS',logout:'LOGOUT',totalServices:'TOTAL SERVICES',expiringSoon:'EXPIRING SOON',expiredAlert:'EXPIRED / ALERT',serviceName:'SERVICE NAME',type:'TYPE',nextDue:'NEXT DUE',uptime:'UPTIME',lastRenew:'LAST RENEW',cyclePeriod:'CYCLE',actions:'ACTIONS',cycle:'CYCLE',reset:'RESET',disabled:'DISABLED',days:'DAYS',daysUnit:'DAYS',typeReset:'RESET',typeCycle:'CYCLE',lunarCal:'Lunar',lbOffline:'OFFLINE',unit:{day:'DAY',month:'MTH',year:'YR'},editService:'EDIT SERVICE',editLastRenewHint:'Please modify in History',newService:'NEW SERVICE',formName:'NAME',namePlaceholder:'e.g. Netflix',formType:'MODE',createDate:'CREATE DATE',interval:'INTERVAL',note:'NOTE',status:'STATUS',active:'ACTIVE',disabledText:'DISABLED',cancel:'CANCEL',save:'SAVE DATA',saveSettings:'SAVE CONFIG',settingsTitle:'SYSTEM CONFIG',setNotify:'NOTIFICATION',pushSwitch:'MASTER PUSH',pushUrl:'WEBHOOK URL',notifyThreshold:'ALERT THRESHOLD',setAuto:'AUTOMATION',autoRenewSwitch:'AUTO RENEW',autoRenewThreshold:'RENEW AFTER',autoDisableThreshold:'DISABLE AFTER',daysOverdue:'DAYS OVERDUE',sysLogs:'SYSTEM LOGS',execLogs:'EXECUTION LOGS',clearHistory:'CLEAR HISTORY',noLogs:'NO DATA',liveLog:'LIVE TERMINAL',btnExport: 'Export Data',btnImport: 'Import Data',btnTest: 'Send Test',btnRefresh:'REFRESH',last12M:'LAST 12M',
+            en: { upcomingBillsDays:'Pending Reminder', upcomingBills: '%s Days Pending', viewSwitch:'VIEW SWITCH',viewProjects:'PROJECTS',viewSpending:'DASHBOARD',annualSummary:'Annual Summary',monthlyTrend:'Monthly Trend',noSpendingData:'No Spending Data',billAmount:'BILL AMOUNT',opSpending:'ACTUAL COST', avgMonthly:'AVG', avgMonthlyLabel:'AVG MONTHLY', filter:{expired:'Overdue/Today', w7:'Within %s Days', w30:'Within 30 Days', future:'Future(>30d)', new:'New (<30d)', stable:'Stable (1m-1y)', long:'Long Term (>1y)', m1:'Last Month', m6:'Last 6 Months', year:'This Year', earlier:'Earlier'}, secPref: 'PREFERENCES',manualRenew: 'Quick Renew',tipToggle: 'Toggle Status',tipRenew: 'Quick Renew',tipEdit: 'Edit Service',tipDelete: 'Delete Service',tipDeleteCh: 'Delete Channel',secNotify: 'NOTIFICATIONS',secData: 'DATA MANAGEMENT',lblIcsTitle: 'CALENDAR SUBSCRIPTION',lblIcsUrl: 'ICS URL (iOS/Google Calendar)',btnCopy: 'COPY',btnResetToken: 'RESET TOKEN',loginTitle:'SYSTEM ACCESS',passwordPlaceholder:'Authorization Key',unlockBtn:'UNLOCK TERMINAL',check:'CHECK',add:'ADD NEW',settings:'CONFIG',logs:'LOGS',logout:'LOGOUT',totalServices:'TOTAL SERVICES',expiringSoon:'EXPIRING SOON',expiredAlert:'EXPIRED / ALERT',serviceName:'SERVICE NAME',type:'TYPE',nextDue:'NEXT DUE',uptime:'UPTIME',lastRenew:'LAST RENEW',cyclePeriod:'CYCLE',actions:'ACTIONS',cycle:'CYCLE',reset:'RESET',disabled:'DISABLED',days:'DAYS',daysUnit:'DAYS',typeReset:'RESET',typeCycle:'CYCLE',lunarCal:'Lunar',lbOffline:'OFFLINE',unit:{day:'DAY',month:'MTH',year:'YR'},editService:'EDIT SERVICE',editLastRenewHint:'Please modify in History',newService:'NEW SERVICE',formName:'NAME',namePlaceholder:'e.g. Netflix',formType:'MODE',createDate:'CREATE DATE',interval:'INTERVAL',note:'NOTE',status:'STATUS',active:'ACTIVE',disabledText:'DISABLED',cancel:'CANCEL',save:'SAVE DATA',saveSettings:'SAVE CONFIG',settingsTitle:'SYSTEM CONFIG',setNotify:'NOTIFICATION',pushSwitch:'MASTER PUSH',pushUrl:'WEBHOOK URL',notifyThreshold:'ALERT THRESHOLD',setAuto:'AUTOMATION',autoRenewSwitch:'AUTO RENEW',autoRenewThreshold:'RENEW AFTER',autoDisableThreshold:'DISABLE AFTER',daysOverdue:'DAYS OVERDUE',sysLogs:'SYSTEM LOGS',execLogs:'EXECUTION LOGS',clearHistory:'CLEAR HISTORY',noLogs:'NO DATA',liveLog:'LIVE TERMINAL',btnExport: 'Export Data',btnImport: 'Import Data',btnTest: 'Send Test',btnRefresh:'REFRESH',last12M:'LAST 12M',
             lblEnable: 'Enable', lblToken: 'Token', lblApiKey: 'API Key', lblChatId: 'Chat ID', 
             lblServer: 'Server URL', lblDevKey: 'Device Key', lblFrom: 'From Email', lblTo: 'To Email',
             lblTopic: 'Topic',readOnly: 'Read-only',
             lblNotifyTime: 'Alarm Time', btnResetToken: 'RESET TOKEN',
             lblHeaders: 'Headers (JSON)', lblBody: 'Body (JSON)',
             tag:{alert:'ALERT',renew:'RENEWED',disable:'DISABLED',normal:'NORMAL'},tagLatest:'LATEST',tagAuto:'AUTO',tagManual:'MANUAL',msg:{confirmRenew: 'Renew [%s] to today based on your timezone?',renewSuccess: 'Renewed! Date updated: %s -> %t',tokenReset: 'Token Reset. Update your calendar apps.', copyOk: 'Link Copied', exportSuccess: 'Backup Downloaded',importSuccess: 'Restore Success, Refreshing...',importFail: 'Import Failed, Check File Format',passReq:'Password Required',saved:'Data Saved',saveFail:'Save Failed',cleared:'Cleared',clearFail:'Clear Failed',loginFail:'Access Denied',loadLogFail:'Load Failed',confirmDel:'Confirm Delete?',dateError:'Last renew date cannot be earlier than create date',nameReq:'Name Required',nameExist:'Name already exists',futureError:'Renew date cannot be in the future',serviceDisabled:'Service Disabled',serviceEnabled:'Service Enabled',execFinish: 'EXECUTION FINISHED!'},tags:'TAGS',tagPlaceholder:'Press Enter to create tag',searchPlaceholder:'Search...',tagsCol:'TAGS',tagAll:'ALL',useLunar:'Lunar Cycle',lunarTip:'Calculate based on Lunar calendar',yes:'Yes',no:'No',timezone:'Timezone',disabledFilter:'DISABLED',policyConfig:'Policy Config',policyNotify:'Notify Days',policyAuto:'Auto Renew',policyRenewDay:'Renew Days',useGlobal:'Global Default',autoRenewOnDesc:'Auto Renew when overdue',autoRenewOffDesc:'Auto Disable when overdue',previewCalc:'Based on Last Renew Date & Interval',nextDue:'NEXT DUE',
-            fixedPrice:'PRICE',currency:'Currency',defaultCurrency:'Default Currency',history:'History',historyTitle:'Renewal History',totalCost:'Total Cost',totalCount:'Total Count',renewDate:'Op Date',billPeriod:'Bill Period',startDate:'Start Date',endDate:'End Date',actualPrice:'Actual Price',notePlaceholder:'Optional note...',btnAddHist:'Add Record',modify:'Edit',confirmDelHist:'Delete record?',opDate:'Op Date',amount:'Amount',period:'Period',spendingDashboard:'SPENDING DASHBOARD',monthlyBreakdown:'MONTHLY BREAKDOWN',total:'TOTAL',count:'COUNT',growth:'GROWTH',currMonth:'CURRENT',itemDetails:'ITEMS',noData:'NO DATA',predictedTag:'PREDICTED', lblPushTitle:'Push Title', pushTitle:'RenewHelper Report',
+            fixedPrice:'PRICE',currency:'Currency',defaultCurrency:'Default Currency',history:'History',historyTitle:'Renewal History',totalCost:'Total Cost',totalCount:'Total Count',renewDate:'Op Date',billPeriod:'Bill Period',startDate:'Start Date',endDate:'End Date',actualPrice:'Actual Price',notePlaceholder:'Optional note...',btnAddHist:'Add Record',modify:'Edit Channel',confirmDelHist:'Delete record?',opDate:'Op Date',amount:'Amount',period:'Period',spendingDashboard:'SPENDING DASHBOARD',monthlyBreakdown:'MONTHLY BREAKDOWN',total:'TOTAL',count:'COUNT',growth:'GROWTH',currMonth:'CURRENT',itemDetails:'ITEMS',noData:'NO DATA',predictedTag:'PREDICTED', lblPushTitle:'Push Title', pushTitle:'RenewHelper Report',
             addChannel: 'Add Channel', noChannels: 'No channels. Add one!', modifyChannel: 'Edit Channel', channelType: 'Type', channelName: 'Name', selectChannels: 'Notification Channels (Leave empty for All)'}
         };
         const LUNAR={info:[0x04bd8,0x04ae0,0x0a570,0x054d5,0x0d260,0x0d950,0x16554,0x056a0,0x09ad0,0x055d2,0x04ae0,0x0a5b6,0x0a4d0,0x0d250,0x1d255,0x0b540,0x0d6a0,0x0ada2,0x095b0,0x14977,0x04970,0x0a4b0,0x0b4b5,0x06a50,0x06d40,0x1ab54,0x02b60,0x09570,0x052f2,0x04970,0x06566,0x0d4a0,0x0ea50,0x06e95,0x05ad0,0x02b60,0x186e3,0x092e0,0x1c8d7,0x0c950,0x0d4a0,0x1d8a6,0x0b550,0x056a0,0x1a5b4,0x025d0,0x092d0,0x0d2b2,0x0a950,0x0b557,0x06ca0,0x0b550,0x15355,0x04da0,0x0a5b0,0x14573,0x052b0,0x0a9a8,0x0e950,0x06aa0,0x0aea6,0x0ab50,0x04b60,0x0aae4,0x0a570,0x05260,0x0f263,0x0d950,0x05b57,0x056a0,0x096d0,0x04dd5,0x04ad0,0x0a4d0,0x0d4d4,0x0d250,0x0d558,0x0b540,0x0b6a0,0x195a6,0x095b0,0x049b0,0x0a974,0x0a4b0,0x0b27a,0x06a50,0x06d40,0x0af46,0x0ab60,0x09570,0x04af5,0x04970,0x064b0,0x074a3,0x0ea50,0x06b58,0x055c0,0x0ab60,0x096d5,0x092e0,0x0c960,0x0d954,0x0d4a0,0x0da50,0x07552,0x056a0,0x0abb7,0x025d0,0x092d0,0x0cab5,0x0a950,0x0b4a0,0x0baa4,0x0ad50,0x055d9,0x04ba0,0x0a5b0,0x15176,0x052b0,0x0a930,0x07954,0x06aa0,0x0ad50,0x05b52,0x04b60,0x0a6e6,0x0a4e0,0x0d260,0x0ea65,0x0d530,0x05aa0,0x076a3,0x096d0,0x04bd7,0x04ad0,0x0a4d0,0x1d0b6,0x0d250,0x0d520,0x0dd45,0x0b5a0,0x056d0,0x055b2,0x049b0,0x0a577,0x0a4b0,0x0aa50,0x1b255,0x06d20,0x0ada0,0x14b63,0x09370,0x049f8,0x04970,0x064b0,0x168a6,0x0ea50,0x06b20,0x1a6c4,0x0aae0,0x0a2e0,0x0d2e3,0x0c960,0x0d557,0x0d4a0,0x0da50,0x05d55,0x056a0,0x0a6d0,0x055d4,0x052d0,0x0a9b8,0x0a950,0x0b4a0,0x0b6a6,0x0ad50,0x055a0,0x0aba4,0x0a5b0,0x052b0,0x0b273,0x06930,0x07337,0x06aa0,0x0ad50,0x14b55,0x04b60,0x0a570,0x054e4,0x0d160,0x0e968,0x0d520,0x0daa0,0x16aa6,0x056d0,0x04ae0,0x0a9d4,0x0a2d0,0x0d150,0x0f252,0x0d520],gan:'甲乙丙丁戊己庚辛壬癸'.split(''),zhi:'子丑寅卯辰巳午未申酉戌亥'.split(''),months:'正二三四五六七八九十冬腊'.split(''),days:'初一,初二,初三,初四,初五,初六,初七,初八,初九,初十,十一,十二,十三,十四,十五,十六,十七,十八,十九,二十,廿一,廿二,廿三,廿四,廿五,廿六,廿七,廿八,廿九,三十'.split(','),lYearDays(y){let s=348;for(let i=0x8000;i>0x8;i>>=1)s+=(this.info[y-1900]&i)?1:0;return s+this.leapDays(y)},leapDays(y){if(this.leapMonth(y))return(this.info[y-1900]&0x10000)?30:29;return 0},leapMonth(y){return this.info[y-1900]&0xf},monthDays(y,m){return(this.info[y-1900]&(0x10000>>m))?30:29},solar2lunar(y,m,d){if(y<1900||y>2100)return null;const base=new Date(1900,0,31),obj=new Date(y,m-1,d);let offset=Math.round((obj-base)/86400000);let ly=1900,temp=0;for(;ly<2101&&offset>0;ly++){temp=this.lYearDays(ly);offset-=temp}if(offset<0){offset+=temp;ly--}let lm=1,leap=this.leapMonth(ly),isLeap=false;for(;lm<13&&offset>0;lm++){if(leap>0&&lm===(leap+1)&&!isLeap){--lm;isLeap=true;temp=this.leapDays(ly)}else{temp=this.monthDays(ly,lm)}if(isLeap&&lm===(leap+1))isLeap=false;offset-=temp}if(offset===0&&leap>0&&lm===leap+1){if(isLeap)isLeap=false;else{isLeap=true;--lm}}if(offset<0){offset+=temp;--lm}const ld=offset+1,gIdx=(ly-4)%10,zIdx=(ly-4)%12;const yStr=this.gan[gIdx<0?gIdx+10:gIdx]+this.zhi[zIdx<0?zIdx+12:zIdx];const mStr=(isLeap?'闰':'')+this.months[lm-1]+'月';return{year:ly,month:lm,day:ld,isLeap,yearStr:yStr,monthStr:mStr,dayStr:this.days[ld-1],fullStr:yStr+'年'+mStr+this.days[ld-1]}}};
@@ -4121,64 +4137,76 @@ const HTML = `<!DOCTYPE html>
                 // 迁移旧数据：账单历史 + 通知渠道
                 const migrateOldData = async (skipConfirm = false) => {
                     try {
-                        // 1. Calculate Bills to Migrate
-                        let billCount = 0;
-                        const itemsToMigrate = [];
+                        // 1. 预先计算迁移内容用于显示确认信息
+                        const itemsToMigrate = list.value.filter(item => 
+                            (!item.renewHistory || item.renewHistory.length === 0) && item.lastRenewDate && item.intervalDays
+                        );
+                        const billCount = itemsToMigrate.length;
                         
-                        list.value.forEach(item => {
-                            if ((!item.renewHistory || item.renewHistory.length === 0) && item.lastRenewDate && item.intervalDays) {
-                                itemsToMigrate.push(item);
-                                billCount++;
-                            }
-                        });
-
-                        // 2. Calculate Channels to Migrate
-                        let channelCount = 0;
-                        const channelsToMigrate = [];
                         const oldConf = settings.value.notifyConfig || {};
                         const legacyEnabled = settings.value.enabledChannels || [];
                         const existingChannels = settings.value.channels || [];
-                        const types = ['telegram', 'bark', 'pushplus', 'notifyx', 'resend', 'webhook', 'gotify', 'ntfy'];
-
+                        const types = ['telegram', 'bark', 'pushplus', 'notifyx', 'resend', 'webhook', 'webhook2', 'webhook3', 'gotify', 'ntfy'];
+                        const channelsToMigrate = [];
+                        
                         types.forEach(type => {
                             const c = oldConf[type];
                             if (!c) return;
-                            // Check content
-                            if (!Object.values(c).some(v => v && v.trim()!=='')) return;
                             
-                            // Check if migrated (Type + '_Old') already exists
+                            // 特殊检查：bark 需要 key，ntfy 需要 token
+                            if (type === 'bark' && (!c.key || !c.key.trim())) return;
+                            if (type === 'ntfy' && (!c.token || !c.token.trim())) return;
+                            
+                            // 通用检查：至少有一个非空值
+                            if (!Object.values(c).some(v => {
+                                if (v === null || v === undefined) return false;
+                                if (typeof v === 'string') return v.trim() !== '';
+                                return true;
+                            })) return;
+                            
                             const suffix = '_Old';
                             const newName = type.charAt(0).toUpperCase() + type.slice(1) + suffix;
-                            if (existingChannels.some(ch => ch.type === type && ch.name === newName)) return;
-
+                            const actualType = (type === 'webhook2' || type === 'webhook3') ? 'webhook' : type;
+                            if (existingChannels.some(ch => ch.name === newName)) return;
                             channelsToMigrate.push({
-                                type,
-                                name: newName,
+                                type: actualType, name: newName,
                                 config: JSON.parse(JSON.stringify(c)),
                                 enable: legacyEnabled.includes(type)
                             });
-                            channelCount++;
                         });
-
+                        const channelCount = channelsToMigrate.length;
+                        
+                        // 2. 没有数据时提示并返回
                         if (billCount === 0 && channelCount === 0) {
-                            if (!skipConfirm) ElMessage.info(lang.value === 'zh' ? '没有需要迁移的数据' : 'No data to migrate');
+                            ElMessage.info(lang.value === 'zh' ? '没有需要迁移的数据' : 'No data to migrate');
                             return;
                         }
-
-                        if (!skipConfirm) {
-                            let msg = '';
-                            if (billCount > 0 && channelCount > 0) msg = lang.value === 'zh' ? \`需为 \${billCount} 个项目生成账单，并迁移 \${channelCount} 个旧通知渠道。\` : \`Migrate \${billCount} bills & \${channelCount} channels.\`;
-                            else if (billCount > 0) msg = lang.value === 'zh' ? \`需为 \${billCount} 个项目生成账单。\` : \`Migrate \${billCount} bills.\`;
-                            else msg = lang.value === 'zh' ? \`需迁移 \${channelCount} 个旧通知渠道。\` : \`Migrate \${channelCount} channels.\`;
-
+                        
+                        // 3. 显示确认对话框（在try块内，用户取消时会被catch捕获）
+                        if (skipConfirm !== true) {
+                            let msg = lang.value === 'zh' 
+                                ? '此操作将进行以下迁移：'
+                                : 'This will perform the following migrations:';
+                            if (billCount > 0) {
+                                msg += lang.value === 'zh' 
+                                    ? ' 为 ' + billCount + ' 个项目生成初始账单；'
+                                    : ' Generate initial bills for ' + billCount + ' items;';
+                            }
+                            if (channelCount > 0) {
+                                msg += lang.value === 'zh'
+                                    ? ' 迁移 ' + channelCount + ' 个旧版通知渠道。'
+                                    : ' Migrate ' + channelCount + ' legacy channels.';
+                            }
+                            msg += lang.value === 'zh' ? ' 是否继续？' : ' Continue?';
+                            
                             await ElMessageBox.confirm(
-                                msg + (lang.value === 'zh' ? ' 是否继续？' : ' Continue?'),
-                                lang.value === 'zh' ? '数据迁移' : 'Data Migration',
-                                { type: 'info', confirmButtonText: t('yes'), cancelButtonText: t('no') }
+                                msg,
+                                lang.value === 'zh' ? '确认数据迁移' : 'Confirm Migration',
+                                { type: 'warning', confirmButtonText: t('yes'), cancelButtonText: t('no') }
                             );
                         }
                         
-                        // Perform Bill Migration
+                        // 4. 执行账单迁移
                         itemsToMigrate.forEach(item => {
                             const startDate = item.lastRenewDate;
                             let endDate = startDate;
@@ -4214,35 +4242,28 @@ const HTML = `<!DOCTYPE html>
                             }];
                         });
 
-                        // Perform Channel Migration
+                        // 5. 执行渠道迁移
                         const migratedNames = [];
                         if (channelCount > 0) {
                             if (!settings.value.channels) settings.value.channels = [];
                             channelsToMigrate.forEach(c => {
                                 settings.value.channels.push({
                                     id: crypto.randomUUID(),
-                                    type: c.type,
-                                    name: c.name,
-                                    config: c.config,
-                                    enable: c.enable
+                                    type: c.type, name: c.name, config: c.config, enable: c.enable
                                 });
                                 migratedNames.push(c.name);
                             });
-                            
-                            // Cleanup Legacy Config
                             delete settings.value.notifyConfig;
                             delete settings.value.enabledChannels;
-
-                            // Refresh settingsForm if settings dialog is open, to show new channels
                             if (settingsVisible.value) {
                                 settingsForm.value = JSON.parse(JSON.stringify(settings.value));
                             }
                         }
                         
+                        // 6. 保存并显示报告
                         await saveData(null, settings.value, false);
                         tableKey.value++;
                         
-                        // Detailed Report
                         const details = [];
                         if (billCount > 0) details.push(lang.value === 'zh' ? \`- 生成 \${billCount} 个初始账单\` : \`- Generated \${billCount} initial bills\`);
                         if (channelCount > 0) details.push(lang.value === 'zh' ? \`- 迁移 \${channelCount} 个通知渠道: \${migratedNames.join(', ')}\` : \`- Migrated \${channelCount} channels: \${migratedNames.join(', ')}\`);
@@ -4253,10 +4274,7 @@ const HTML = `<!DOCTYPE html>
                             lang.value === 'zh' ? '迁移报告' : 'Migration Report',
                             { dangerouslyUseHTMLString: true, type: 'success' }
                         );
-
-                    } catch (e) {
-                         console.error(e);
-                    }
+                    } catch {}
                 };
 
                 const clearLogs = async () => { await fetch('/api/logs/clear',{method:'POST',headers:getAuth()}); historyLogs.value=[]; ElMessage.success(t('msg.cleared')); };
@@ -4950,7 +4968,7 @@ const HTML = `<!DOCTYPE html>
                     dialogVisible, settingsVisible, historyVisible, historyLoading, historyLogs, checking, logs, displayLogs, form, settingsForm, isEdit,
                     expiringCount, expiredCount, currentTag, allTags, filteredList, upcomingBillsList, upcomingBillsTotal, searchKeyword, logVisible,formatLogTime,Upload, Download,
                     openAdd, editItem, deleteItem, saveItem, openSettings, saveSettings, runCheck, openHistoryLogs, clearLogs, toggleEnable,importRef, exportData, triggerImport, handleImportFile,
-                    Edit, Delete, Plus, VideoPlay, Setting, Bell, Document, Lock, Monitor, SwitchButton, Calendar, Timer, Files, AlarmClock, Warning, Search, Cpu, Link, Connection, Message, Promotion, Iphone, Moon, Sunny, ArrowDown, Tickets,
+                    Edit, Delete, Plus, VideoPlay, Setting, Bell, Document, Lock, Monitor, SwitchButton, Calendar, Timer, Files, AlarmClock, Warning, Search, Cpu, Link, Connection, Message, Promotion, Iphone, Moon, Sunny, ArrowDown, Tickets, Sort,
                     getDaysClass, formatDaysLeft, getTagClass, getLogColor, getLunarStr, getYearGanZhi, getSmartLunarText, getLunarTooltip, getMonthStr, getTagCount, tableRowClassName, testChannel,
                     channelTypes, getChannelSummary, onChannelTypeChange, openAddChannel, openEditChannel, saveChannel, deleteChannelById, channelDialogVisible, channelForm,
                     channelLimit, loadMoreChannels, pagedChannels, getChannelTagClass,testCurrentChannel,
