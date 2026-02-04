@@ -5,7 +5,8 @@
  * See CHANGELOG.md for history.
  */
 import { HTML } from '../html-template.js';
-const APP_VERSION = "v2.2.8";
+// APP_VERSION 将在构建时由 esbuild 注入 (__BUILD_VERSION__)
+const APP_VERSION = "__BUILD_VERSION__";
 //接入免费汇率API
 const EXCHANGE_RATE_API_URL = 'https://api.frankfurter.dev/v1/latest?base=';
 

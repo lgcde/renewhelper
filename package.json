@@ -1,6 +1,6 @@
 {
   "name": "renewhelper",
-  "version": "2.2.8",
+  "version": "3.0.7",
   "description": "A serverless service lifecycle manager on Cloudflare Workers",
   "main": "_worker.js",
   "keywords": [
@@ -26,10 +26,12 @@
   },
   "homepage": "https://github.com/ieax/renewhelper#readme",
   "devDependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
     "@tailwindcss/postcss": "^4.1.18",
     "@tailwindcss/vite": "^4.1.18",
-    "@vitejs/plugin-vue": "^6.0.3",
-    "autoprefixer": "^10.4.23",
+    "@vitejs/plugin-vue": "^6.0.4",
+    "autoprefixer": "^10.4.24",
+    "element-plus": "^2.13.2",
     "esbuild": "^0.27.2",
     "html-minifier-terser": "^7.2.0",
     "postcss": "^8.5.6",
@@ -38,11 +40,7 @@
     "unplugin-vue-components": "^31.0.0",
     "vite": "^5.4.21",
     "vite-plugin-singlefile": "^2.3.0",
+    "vue": "^3.5.27",
     "wrangler": "^4.61.1"
-  },
-  "dependencies": {
-    "@element-plus/icons-vue": "^2.3.2",
-    "element-plus": "^2.11.9",
-    "vue": "^3.5.25"
   }
 }

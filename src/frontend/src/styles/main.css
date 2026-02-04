@@ -1,0 +1,811 @@
+/* TailwindCSS v4 导入 */
+@import "tailwindcss";
+@config "../../tailwind.config.js";
+
+:root {
+    --bg-body: #f1f5f9;
+    --bg-panel: #ffffff;
+    --text-main: #0f172a;
+    --text-dim: #64748b;
+    --border: #cbd5e1;
+    --el-bg-color: #ffffff;
+}
+
+@keyframes spin-slow {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes breathe-glow {
+
+    0%,
+    100% {
+        opacity: 0.5;
+        filter: drop-shadow(0 0 0px rgba(34, 211, 238, 0));
+    }
+
+    50% {
+        opacity: 1;
+        filter: drop-shadow(0 0 5px rgba(34, 211, 238, 0.8));
+    }
+}
+
+.anim-spin {
+    transform-origin: center;
+    transform-box: view-box;
+    animation: spin-slow 30s linear infinite;
+    /* 30秒转一圈 */
+}
+
+.anim-breathe {
+    animation: breathe-glow 3s ease-in-out infinite;
+}
+
+/* --------------------------- */
+html.dark {
+    --bg-body: #020617;
+    --bg-panel: #0f172a;
+    --text-main: #f1f5f9;
+    --text-dim: #94a3b8;
+    --border: #1e293b;
+    --el-bg-color: #0f172a;
+    --el-text-color-primary: #f1f5f9;
+    --el-text-color-regular: #cbd5e1;
+    --el-border-color: #1e293b;
+    --el-border-color-light: #334155;
+    --el-fill-color-blank: #0f172a;
+}
+
+body {
+    background: var(--bg-body);
+    color: var(--text-main);
+    font-family: 'Rajdhani', sans-serif;
+    background-image: linear-gradient(rgba(0, 0, 0, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+    background-size: 40px 40px;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+/* Dark Mode Grid Background */
+html.dark body {
+    background-image: linear-gradient(rgba(96, 165, 250, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(96, 165, 250, 0.1) 1px, transparent 1px);
+    background-size: 40px 40px;
+}
+
+@layer components {
+    .mecha-panel {
+        @apply bg-white border border-gray-200 dark:bg-slate-900 dark:border-slate-700;
+        border-color: var(--border);
+        clip-path: polygon(0 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        transition: background-color 0.3s, border-color 0.3s;
+    }
+
+    .mecha-btn {
+        clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+        border-radius: 0 !important;
+        border: none !important;
+        font-weight: 700 !important;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        transition: all 0.2s;
+    }
+}
+
+/* Custom Scrollbar */
+/* Custom Scrollbar - Semi-transparent, visible on hover */
+.custom-scrollbar::-webkit-scrollbar,
+.scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track,
+.scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb,
+.scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-radius: 3px;
+    transition: background-color 0.3s;
+}
+
+.custom-scrollbar:hover::-webkit-scrollbar-thumb,
+.scrollbar-thin:hover::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.3);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover,
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(156, 163, 175, 0.6);
+}
+
+.mecha-btn:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.1);
+}
+
+.mecha-btn.is-circle {
+    clip-path: none !important;
+    border-radius: 50% !important;
+    width: 32px;
+    height: 32px;
+    padding: 8px;
+}
+
+.el-dialog,
+.el-drawer {
+    --el-bg-color: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 0 !important;
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 20px), calc(100% - 20px) 100%, 0 100%);
+}
+
+.el-dialog__title,
+.el-drawer__title {
+    color: var(--text-main) !important;
+}
+
+.el-input__wrapper {
+    background-color: var(--bg-body) !important;
+    border-radius: 0 !important;
+    box-shadow: 0 0 0 1px var(--border) inset !important;
+}
+
+.el-input__inner {
+    color: var(--text-main) !important;
+}
+
+.settings-body-fix .el-dialog__body {
+    padding: 2px !important;
+}
+
+.radio-group-fix {
+    display: flex;
+    width: 100%;
+    gap: 8px;
+}
+
+.radio-item {
+    flex: 1;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--bg-body);
+    color: var(--text-dim);
+    font-weight: 700;
+    transition: all 0.3s;
+    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+
+.radio-item.active {
+    background: rgba(37, 99, 235, 0.15);
+    border-color: #2563eb;
+    color: #2563eb;
+}
+
+.el-input-group__append {
+    background-color: var(--bg-body) !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    border-left: 1px solid var(--border);
+}
+
+.el-input-group__append .el-input__wrapper {
+    box-shadow: none !important;
+    background-color: transparent !important;
+}
+
+.el-input-group__append .el-select .el-input.is-focus .el-input__wrapper {
+    box-shadow: none !important;
+}
+
+.el-input-group__append .el-select {
+    margin: 0;
+}
+
+.el-input-group__append .el-select .el-input__inner {
+    text-align: center;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+/* Timeline Fixes */
+.el-timeline-item__node--normal {
+    width: 10px;
+    height: 10px;
+    left: 0px;
+}
+
+.el-timeline-item__tail {
+    left: 4px;
+    border-left: 2px dashed var(--border);
+}
+
+.el-timeline-item__wrapper {
+    padding-left: 24px;
+    top: -3px;
+}
+
+/* Dark Mode adjustments for Timeline */
+html.dark .mecha-panel {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+}
+
+html.dark .el-timeline-item__tail {
+    border-left-color: #334155;
+}
+
+.disabled-row {
+    opacity: 0.5;
+    filter: grayscale(1);
+}
+
+.tag-compact {
+    display: inline-flex;
+    height: 16px;
+    padding: 0 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 600;
+    background: var(--bg-body);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    align-items: center;
+}
+
+.filter-row {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+@media (min-width: 640px) {
+    .filter-row {
+        flex-direction: row;
+        align-items: center;
+    }
+}
+
+.search-box {
+    width: 100%;
+    max-width: 250px;
+}
+
+.filter-bar-wrapper {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+}
+
+.fixed-tags {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.scroll-tags {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+}
+
+.filter-bar-view {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding-bottom: 0 !important;
+}
+
+.tag-scrollbar .el-scrollbar__bar {
+    display: none !important;
+}
+
+.tag-scroll-wrap {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+
+.tag-scroll-wrap::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+}
+
+.scroll-controls {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+    margin-left: 4px;
+}
+
+.btn-scroll {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: var(--bg-body);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.btn-scroll:hover {
+    background: #2563eb;
+    color: #fff;
+    border-color: #2563eb;
+}
+
+.filter-chip {
+    position: relative;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--bg-body);
+    color: var(--text-dim);
+    transition: all 0.2s;
+    clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+    overflow: hidden;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.filter-chip.active {
+    background: #2563eb;
+    color: white;
+    border-color: #2563eb;
+}
+
+.tag-count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    padding: 0 4px;
+    margin-left: 6px;
+    font-size: 10px;
+    height: 16px;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+html.dark .tag-count-badge {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.filter-chip.active .tag-count-badge {
+    background: rgba(255, 255, 255, 0.3);
+    color: #fff;
+}
+
+.chip-active-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    background: #22d3ee;
+    box-shadow: 0 -1px 4px #22d3ee;
+    width: 0%;
+    animation: chipScan 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes chipScan {
+    from {
+        width: 0%;
+        opacity: 0.5;
+    }
+
+    to {
+        width: 100%;
+        opacity: 1;
+    }
+}
+
+.hud-panel {
+    margin-top: 10px;
+    margin-bottom: 5px;
+    background: linear-gradient(90deg, #e2e8f0 0%, #cbd5e1 100%);
+    border-left: 4px solid #3b82f6;
+    color: #1e293b;
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    animation: slideIn 0.3s ease-out;
+}
+
+html.dark .hud-panel {
+    background: linear-gradient(90deg, #0f172a 0%, #1e293b 100%);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.hud-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+.hud-bar-container {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    height: 16px;
+}
+
+.hud-bar {
+    width: 4px;
+    background: #94a3b8;
+    transform: skewX(-20deg);
+    flex-shrink: 0;
+    animation: hud-equalizer 1s infinite ease-in-out;
+}
+
+html.dark .hud-bar {
+    background: #334155;
+}
+
+@keyframes hud-equalizer {
+
+    0%,
+    100% {
+        height: 4px;
+        opacity: 0.5;
+    }
+
+    50% {
+        height: 12px;
+        background: #22d3ee;
+        opacity: 1;
+        box-shadow: 0 0 5px #22d3ee;
+    }
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Lunar Popper Styles */
+.lunar-popper .el-date-table td {
+    height: 40px !important;
+    padding: 2px !important;
+}
+
+.lunar-popper .el-date-table td .el-date-table-cell {
+    height: 100% !important;
+    padding: 0 !important;
+    display: block;
+}
+
+.lunar-cell {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.lunar-cell .view-date {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0px !important;
+}
+
+.lunar-cell .view-month,
+.lunar-cell .view-year {
+    display: none;
+}
+
+.lunar-popper .el-month-table .lunar-cell .view-date,
+.lunar-popper .el-month-table .lunar-cell .view-year {
+    display: none !important;
+}
+
+.lunar-popper .el-month-table .lunar-cell .view-month {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.lunar-popper .el-year-table .lunar-cell .view-date,
+.lunar-popper .el-year-table .lunar-cell .view-month {
+    display: none !important;
+}
+
+.lunar-popper .el-year-table .lunar-cell .view-year {
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+}
+
+.view-year .y-num {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.view-year .y-ganzhi {
+    font-size: 12px;
+    color: #909399;
+    transform: scale(0.9);
+    margin-top: -2px;
+    display: block !important;
+}
+
+.lunar-cell .lunar {
+    font-size: 10px;
+    color: #94a3b8;
+    line-height: 1.1 !important;
+    margin-top: 0 !important;
+    transform: scale(0.9);
+}
+
+.bar-scanner {
+    background-color: #3b82f6;
+    box-shadow: 0 0 2px rgba(59, 130, 246, 0.3);
+    transform: scaleX(1);
+    animation: scanner-wave 3s ease-in-out infinite;
+}
+
+@keyframes scanner-wave {
+
+    0%,
+    100% {
+        background-color: #3b82f6;
+        transform: scaleX(1);
+    }
+
+    50% {
+        background-color: #22d3ee;
+        box-shadow: 0 0 12px #22d3ee;
+        transform: scaleX(1.3);
+    }
+}
+
+.sys-beat-container {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 12px;
+    padding-left: 12px;
+    border-left: 1px solid var(--border);
+    height: 16px;
+}
+
+.sys-beat-bar {
+    width: 3px;
+    height: 8px;
+    background: var(--text-dim);
+    transform: skewX(-20deg);
+    animation: sys-beat 1.2s infinite ease-in-out;
+}
+
+@keyframes sys-beat {
+
+    0%,
+    100% {
+        height: 6px;
+        background: var(--border);
+    }
+
+    50% {
+        height: 14px;
+        background: #10b981;
+        box-shadow: 0 0 5px #10b981;
+    }
+}
+
+.terminal-window {
+    background-color: #0f172a;
+    color: #4ade80;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 16px;
+    height: 320px;
+    overflow-y: auto;
+    border: 1px solid #334155;
+    font-size: 13px;
+    line-height: 1.5;
+    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.terminal-line {
+    margin-bottom: 4px;
+    display: flex;
+}
+
+.terminal-line::before {
+    content: '>';
+    color: #3b82f6;
+    margin-right: 8px;
+    font-weight: bold;
+}
+
+.typing-cursor::after {
+    content: '▋';
+    animation: blink 1s infinite;
+    color: #4ade80;
+    margin-left: 4px;
+}
+
+@keyframes blink {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0;
+    }
+}
+
+/* Date Picker Active States */
+.lunar-popper .el-date-table td.current,
+.lunar-popper .el-year-table td.current,
+.lunar-popper .el-month-table td.current {
+    --el-datepicker-active-color: transparent !important;
+    background-color: transparent !important;
+}
+
+/* The blue selection box for date view */
+.lunar-popper .el-date-table td.current .lunar-cell {
+    background-color: #2563eb;
+    border-radius: 4px;
+    color: #ffffff !important;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+}
+
+.lunar-popper .el-date-table td.current .el-date-table-cell__text {
+    background-color: transparent !important;
+}
+
+.lunar-popper .el-date-table td.current .lunar-cell .solar,
+.lunar-popper .el-date-table td.current .lunar-cell .lunar {
+    color: #ffffff !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* Hover states for all views */
+.lunar-popper .el-date-table td.available:hover,
+.lunar-popper .el-year-table td.available:hover,
+.lunar-popper .el-month-table td.available:hover {
+    background-color: transparent !important;
+}
+
+.lunar-popper .el-date-table td.available:not(.current):hover .lunar-cell {
+    background-color: rgba(37, 99, 235, 0.05) !important;
+    border-radius: 4px;
+    box-shadow: 0 0 0 1px #2563eb inset;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.lunar-popper .el-date-table td.available:not(.current):hover .lunar-cell .solar,
+.lunar-popper .el-date-table td.available:not(.current):hover .lunar-cell .lunar {
+    color: #2563eb !important;
+    font-weight: bold;
+}
+
+.lunar-cell .solar {
+    line-height: 1.2 !important;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+/* 年视图和月视图选中状态 - 使用 .lunar-cell 而不是 .cell */
+.lunar-popper .el-year-table td.current .lunar-cell,
+.lunar-popper .el-month-table td.current .lunar-cell {
+    background-color: #2563eb !important;
+    color: #fff !important;
+    border-radius: 4px !important;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4) !important;
+}
+
+/* 选中状态下的所有文字为白色 */
+.lunar-popper .el-year-table td.current .lunar-cell .y-num,
+.lunar-popper .el-year-table td.current .lunar-cell .y-ganzhi,
+.lunar-popper .el-month-table td.current .lunar-cell .view-month {
+    color: #ffffff !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* Hover 状态 - 年视图和月视图 */
+.lunar-popper .el-year-table td.available:not(.current):hover .lunar-cell,
+.lunar-popper .el-year-table td:not(.current):not(.disabled):hover .lunar-cell,
+.lunar-popper .el-month-table td.available:not(.current):hover .lunar-cell,
+.lunar-popper .el-month-table td:not(.current):not(.disabled):hover .lunar-cell {
+    background-color: rgba(37, 99, 235, 0.05) !important;
+    border-radius: 4px !important;
+    box-shadow: 0 0 0 1px #2563eb inset !important;
+    cursor: pointer !important;
+    transition: all 0.2s !important;
+}
+
+/* Hover 状态下的文字颜色 - 年视图 */
+.lunar-popper .el-year-table td:not(.current):not(.disabled):hover .lunar-cell .y-num,
+.lunar-popper .el-year-table td:not(.current):not(.disabled):hover .lunar-cell .y-ganzhi {
+    color: #2563eb !important;
+    font-weight: bold !important;
+}
+
+/* Hover 状态下的文字颜色 - 月视图 */
+.lunar-popper .el-month-table td:not(.current):not(.disabled):hover .lunar-cell .view-month {
+    color: #2563eb !important;
+    font-weight: bold !important;
+}
+
+.el-table {
+    --el-table-bg-color: var(--bg-panel);
+    --el-table-tr-bg-color: var(--bg-panel);
+    --el-table-header-bg-color: var(--bg-body);
+    --el-table-row-hover-bg-color: var(--bg-body);
+    --el-table-border-color: var(--border);
+    --el-table-text-color: var(--text-main);
+    --el-table-header-text-color: var(--text-dim);
+}
+
+.el-table .cell {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+}
+
+html.dark .lunar-popper .el-year-table td .cell,
+html.dark .lunar-popper .el-month-table td .cell {
+    color: #cbd5e1;
+}
+
+.notify-item-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.notify-label {
+    width: 90px;
+    text-align: right;
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+[v-cloak] {
+    display: none !important;
+}

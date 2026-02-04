@@ -3,18 +3,46 @@ const fs = require('fs');
 const path = require('path');
 const esbuild = require('esbuild');
 
-// 读取 package.json 获取版本号
-const packageJson = require('../package.json');
-const APP_VERSION = packageJson.version || '1.0.0';
+// 读取 package.json
+const packageJsonPath = path.join(__dirname, '../package.json');
+const packageJson = require(packageJsonPath);
+
+// --- 自动递增版本号逻辑 ---
+function incrementVersion(version) {
+    const parts = version.split('.');
+    if (parts.length === 3) {
+        parts[2] = parseInt(parts[2], 10) + 1;
+        return parts.join('.');
+    }
+    return version;
+}
+
+const oldVersion = packageJson.version || '1.0.0';
+const newVersion = incrementVersion(oldVersion);
+packageJson.version = newVersion;
+
+// 回写 package.json
+fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
+console.log(`🆙 版本自动升级: v${oldVersion} -> v${newVersion}`);
+
+const APP_VERSION = newVersion;
 
 async function build() {
     console.log(`🚀 开始构建 v${APP_VERSION} (安全模式)...`);
 
-    // --- 1. 处理 HTML ---
-    const htmlPath = path.join(__dirname, '../src/frontend/index.html');
+    // --- 1. 处理 HTML (Vite Build) ---
+    console.log('⚡ 执行 Vite 构建...');
+    try {
+        require('child_process').execSync('npx vite build --config src/frontend/vite.config.mjs', { stdio: 'inherit', cwd: path.join(__dirname, '..') });
+    } catch (e) {
+        console.error('❌ Vite 构建失败，请检查前端代码。');
+        process.exit(1);
+    }
+
+    const htmlPath = path.join(__dirname, '../dist/index.html');
     const tempJsPath = path.join(__dirname, '../src/html-template.js');
 
-    console.log('📄 读取并处理 HTML...');
+    console.log('📄 读取构建产物 (dist/index.html)...');
     let htmlContent = fs.readFileSync(htmlPath, 'utf-8');
 
     // 步骤 A: 替换版本号变量
@@ -36,7 +64,10 @@ async function build() {
             format: 'esm',
             target: 'es2020',
             charset: 'utf8',
-            define: { 'process.env.NODE_ENV': '"production"' }
+            define: {
+                'process.env.NODE_ENV': '"production"',
+                '__BUILD_VERSION__': JSON.stringify(`v${APP_VERSION}`)
+            }
         });
     } catch (e) {
         console.error('❌ 打包失败:', e);
