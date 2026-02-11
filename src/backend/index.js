@@ -732,6 +732,30 @@ const Notifier = {
             });
             return r.ok ? "OK" : "FAIL";
         },
+        serverchan3: async (c, title, body) => {
+            if (!c.uid || !c.key) return "MISSING_CONF";
+            const url = `https://${c.uid}.push.ft07.com/send/${c.key}.send?title=${encodeURIComponent(title)}&desp=${encodeURIComponent(body)}`;
+            const r = await fetch(url);
+            return r.ok ? "OK" : "FAIL";
+        },
+        dingtalk: async (c, title, body) => {
+            if (!c.token) return "MISSING_CONF";
+            let url = `https://oapi.dingtalk.com/robot/send?access_token=${c.token}`;
+            if (c.secret) {
+                const timestamp = Date.now();
+                const str = `${timestamp}\n${c.secret}`;
+                const key = await crypto.subtle.importKey(
+                    "raw", new TextEncoder().encode(c.secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+                );
+                const sign = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(str)))));
+                url += `&timestamp=${timestamp}&sign=${encodeURIComponent(sign)}`;
+            }
+            const r = await fetch(url, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ msgtype: "markdown", markdown: { title, text: `## ${title}\n\n${body}` } })
+            });
+            return r.ok ? "OK" : "FAIL";
+        },
     },
 };
 

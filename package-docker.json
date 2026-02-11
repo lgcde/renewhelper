@@ -1,6 +1,6 @@
 {
   "name": "renew-helper-docker",
-  "version": "3.1.6",
+  "version": "3.2.8",
   "type": "module",
   "scripts": {
     "start": "node docker-runner.js"
