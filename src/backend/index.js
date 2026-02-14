@@ -1543,7 +1543,8 @@ app.get(
         // 4. Try Backup Key Auth (Header)
         if (!authed && settings.backupKey) {
             const key = req.headers.get("X-Backup-Key");
-            if (key && key === settings.backupKey) authed = true;
+            // 【修复】使用恒定时间比较防止时序攻击
+            if (key && (await Auth.safeCompare(key, settings.backupKey))) authed = true;
         }
 
         if (!authed) {

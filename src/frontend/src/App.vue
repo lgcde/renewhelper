@@ -3076,7 +3076,7 @@ const openLink = (url) => { if (url) window.open(url, '_blank'); };
                                 #prefix><el-icon>
                                     <Monitor />
                                 </el-icon></template></el-input></el-form-item>
-                    <el-form-item :label="t('tags')"><el-select v-model="form.tags" multiple filterable allow-create
+                    <el-form-item :label="t('tags')"><el-select v-model="form.tags" multiple filterable clearable allow-create
                             default-first-option :reserve-keyword="false" :placeholder="t('tagPlaceholder')"
                             style="width:100%" size="large"><el-option v-for="tag in allTags" :key="tag" :label="tag"
                                 :value="tag"></el-option></el-select></el-form-item>
